@@ -19,8 +19,11 @@
 
 | 파일 | 설명 |
 |---|---|
+| [`hotel-twist-ep1-60s.mp4`](hotel-twist-ep1-60s.mp4) | **완성 영상 (실제 인물)** · 1080×1920 · 30fps · 60초 · 32MB |
 | [`index.html`](index.html) | 쇼츠 본체. 크롬/엣지에서 열어 인물 이미지 3장을 넣고 MP4로 저장 |
-| [`sample-silhouette-60s.mp4`](sample-silhouette-60s.mp4) | 샘플 영상 · 1080×1920 · 30fps · 60초 · 26MB (임시 실루엣) |
+| `cast1-seoyun-wife.jpg` 외 2장 | 영상에 쓴 캐릭터 시트 원본 |
+| [`build.sh`](build.sh) | 헤드리스 크롬(agent-browser)으로 미리보기와 MP4를 다시 만드는 스크립트 |
+| [`sample-silhouette-60s.mp4`](sample-silhouette-60s.mp4) | 임시 실루엣 샘플 · 26MB |
 
 ## 실제 인물로 만들기
 
