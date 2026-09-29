@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>1207호의 비밀 — 60초 반전 드라마 쇼츠</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; gap: 20px; align-items: center; justify-content: center;
+         background: #07070a; color: #ddd; font-family: system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; padding: 16px; flex-wrap: wrap; }
+  canvas { height: min(calc(100vh - 32px), 1000px); aspect-ratio: 9 / 16; background: #000; border-radius: 12px; box-shadow: 0 20px 80px #0009; }
+  .panel { width: 340px; display: flex; flex-direction: column; gap: 10px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button, .file { background: #1b1b24; color: #eee; border: 1px solid #333; border-radius: 6px; padding: 8px 12px; font-size: 14px; cursor: pointer; }
+  button:hover, .file:hover { background: #262634; }
+  button.hot { border-color: #e0a84a; color: #ffd48a; }
+  button:disabled { opacity: .5; cursor: default; }
+  .file input { display: none; }
+  .slot { border: 1px solid #2a2a36; border-radius: 8px; padding: 8px; font-size: 13px; line-height: 1.5; }
+  .slot b { color: #ffd48a; }
+  .slot small { color: #888; display: block; }
+  input[type=range] { width: 100%; accent-color: #e0a84a; }
+  #tc { font-variant-numeric: tabular-nums; font-size: 13px; }
+  #status { font-size: 12px; color: #9a9ab0; min-height: 1.4em; }
+  label { font-size: 13px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<div class="panel">
+  <h1>1207호의 비밀 · EP.1 (60초)</h1>
+  <div class="slot"><b>① 서윤 (아내)</b> — 검정 수트 여성<small>정면·뒷모습·클로즈업 3컷 시트</small>
+    <label class="file">🖼 이미지 선택<input id="f0" type="file" accept="image/*" /></label> <span id="s0">임시 실루엣</span></div>
+  <div class="slot"><b>② 도현 (남편)</b> — 검정 수트 남성<small>뒷모습·클로즈업만 사용 (정면 컷은 얼굴이 없어 제외)</small>
+    <label class="file">🖼 이미지 선택<input id="f1" type="file" accept="image/*" /></label> <span id="s1">임시 실루엣</span></div>
+  <div class="slot"><b>③ 하린 (호텔 이벤트 매니저)</b> — 회색 블레이저 여성<small>성인 호텔 직원 역할</small>
+    <label class="file">🖼 이미지 선택<input id="f2" type="file" accept="image/*" /></label> <span id="s2">임시 실루엣</span></div>
+  <label><input id="key" type="checkbox" checked /> 회색 배경 자동 제거</label>
+  <div class="row">
+    <button id="play" class="hot">▶ 재생</button>
+    <button id="restart">⏮ 처음부터</button>
+    <span id="tc">00:00 / 01:00</span>
+  </div>
+  <input id="scrub" type="range" min="0" max="60" step="0.01" value="0" />
+  <div class="row">
+    <select id="quality">
+      <option value="std">표준 (30fps · 약 35MB)</option>
+      <option value="light">가벼운 파일 (30fps · 약 15MB)</option>
+    </select>
+    <button id="mp4" class="hot">⬇ MP4 다운로드</button>
+  </div>
+  <div id="status">음악 생성 중…</div>
+</div>
+<script>
+/* =====================================================================
+   「1207호의 비밀」 EP.1 — 60초 세로(9:16) 반전 드라마 쇼츠
+   0–4   훅 : 아내 클로즈업 "결혼 7주년, 남편이 호텔에 있었다"
+   4–14  호텔 로비 : 남편 → 프런트 매니저에게 카드키를 받음
+   14–27 기둥 뒤 아내 / 남편·매니저 밀담 / 아내의 눈물
+   27–34.6 엘리베이터 12층 → 1207호 문 앞 → 문을 열자
+   34.6–50 반전① : 결혼 7주년 서프라이즈 파티
+   50–60 반전② : 아내 휴대폰 "1208호에서 기다릴게" → 2화에서 계속
+   ===================================================================== */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const W = 1080, H = 1920, CX = W / 2, CY = H / 2, DUR = 60;
+const FONT = '"Noto Sans","Helvetica Neue",Arial,sans-serif';
+const KFONT = '"Pretendard","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans CJK KR",sans-serif';
+const SERIF = '"Noto Serif KR","Nanum Myeongjo","Batang",Georgia,serif';
+const $ = id => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const P = (t, a, b) => clamp((t - a) / (b - a));
+const ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const outC = x => 1 - Math.pow(1 - x, 3);
+const hash = x => { const s = Math.sin(x * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+function rng(s) { return () => (s = (s * 16807) % 2147483647, (s - 1) / 2147483646); }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+function circle(g, x, y, r) { g.beginPath(); g.arc(x, y, Math.max(0, r), 0, Math.PI * 2); g.fill(); }
+function rrect(g, x, y, w, h, r) { g.beginPath(); g.roundRect ? g.roundRect(x, y, w, h, r) : g.rect(x, y, w, h); }
+function text(str, x, y, size, color, o = {}) {
+  const { weight = 800, align = 'center', alpha = 1, font = KFONT, stroke = 0, strokeColor = '#000', spacing = 0, shadow = 0 } = o;
+  ctx.save(); ctx.globalAlpha *= alpha;
+  ctx.font = `${weight} ${size}px ${font}`; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = spacing + 'px';
+  if (shadow) { ctx.shadowColor = 'rgba(0,0,0,.85)'; ctx.shadowBlur = shadow; }
+  if (stroke) { ctx.strokeStyle = strokeColor; ctx.lineWidth = stroke; ctx.lineJoin = 'round'; ctx.strokeText(str, x, y); ctx.shadowBlur = 0; }
+  ctx.fillStyle = color; ctx.fillText(str, x, y); ctx.restore();
+}
+
+// =====================================================================
+// 1) 인물 — 캐릭터 시트 → 정면/뒷모습/클로즈업 자동 분할 + 배경 제거
+// =====================================================================
+function boxBlur(a, w, h, r) {
+  const t = new Float32Array(a.length), o = new Float32Array(a.length), k = 2 * r + 1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let s = 0; for (let i = -r; i <= r; i++) s += a[y * w + clamp(x + i, 0, w - 1)]; t[y * w + x] = s / k; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let s = 0; for (let i = -r; i <= r; i++) s += t[clamp(y + i, 0, h - 1) * w + x]; o[y * w + x] = s / k; }
+  return o;
+}
+// 가장자리와 연결된 무채색 회색 영역을 제거. 성공 시 알파 마스크(Uint8) 반환
+function keyOut(c) {
+  const g = c.getContext('2d', { willReadFrequently: true });
+  const w = c.width, h = c.height, n = w * h, id = g.getImageData(0, 0, w, h), d = id.data, bg = new Uint8Array(n);
+  for (let i = 0, p = 0; i < n; i++, p += 4) {
+    const r = d[p], gg = d[p + 1], b = d[p + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), l = 0.299 * r + 0.587 * gg + 0.114 * b;
+    bg[i] = (mx - mn < 18 && Math.abs(r - b) < 14 && l > 70 && l < 235) ? 1 : 0;
+  }
+  const m = new Uint8Array(n), st = new Int32Array(n); let sp = 0;
+  const push = i => { if (bg[i] && !m[i]) { m[i] = 1; st[sp++] = i; } };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (sp) { const i = st[--sp], x = i % w; if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (i >= w) push(i - w); if (i < n - w) push(i + w); }
+  let removed = 0; const a = new Float32Array(n);
+  for (let i = 0; i < n; i++) { a[i] = m[i] ? 0 : 1; removed += m[i]; }
+  const ratio = removed / n;
+  if (ratio < 0.2 || ratio > 0.93) return { ok: false, ratio };
+  const f = boxBlur(a, w, h, 2);
+  for (let i = 0; i < n; i++) d[i * 4 + 3] = Math.round(d[i * 4 + 3] * clamp((f[i] - 0.35) / 0.65));
+  g.putImageData(id, 0, 0);
+  return { ok: true, ratio };
+}
+// 알파 기준으로 인물이 있는 세로 구간을 찾아 3컷으로 분할
+function findPanels(c) {
+  const w = c.width, h = c.height, d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  const col = new Float32Array(w);
+  for (let x = 0; x < w; x++) { let s = 0; for (let y = 0; y < h; y += 2) if (d[(y * w + x) * 4 + 3] > 128) s++; col[x] = s / (h / 2); }
+  const segs = []; let st = -1;
+  for (let x = 0; x <= w; x++) {
+    const on = x < w && col[x] > 0.012;
+    if (on && st < 0) st = x;
+    if (!on && st >= 0) { segs.push([st, x]); st = -1; }
+  }
+  const merged = [];
+  for (const s of segs) { const l = merged[merged.length - 1]; if (l && s[0] - l[1] < w * 0.025) l[1] = s[1]; else merged.push([...s]); }
+  const big = merged.filter(s => s[1] - s[0] > w * 0.05).sort((a, b) => (b[1] - b[0]) - (a[1] - a[0])).slice(0, 3).sort((a, b) => a[0] - b[0]);
+  if (big.length < 3) return null;
+  return big.map(([x0, x1]) => {
+    let y0 = h, y1 = 0;
+    for (let y = 0; y < h; y += 2) for (let x = x0; x < x1; x += 3) if (d[(y * w + x) * 4 + 3] > 128) { if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    return [Math.max(0, x0 - 6), Math.max(0, y0 - 6), Math.min(w, x1 + 6), Math.min(h, y1 + 8)];
+  });
+}
+function cropC(src, x0, y0, x1, y1) {
+  const c = mk(Math.max(1, Math.round(x1 - x0)), Math.max(1, Math.round(y1 - y0)));
+  c.getContext('2d').drawImage(src, x0, y0, c.width, c.height, 0, 0, c.width, c.height); return c;
+}
+// 정면/뒷모습: 발끝(하단 중앙) 기준, 클로즈업: 얼굴 기준
+const shot = (img, fx, fy) => ({ img, fx, fy });
+function processSheet(img, key) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height, sc = Math.min(1, 2000 / iw);
+  const w = Math.round(iw * sc), h = Math.round(ih * sc), base = mk(w, h);
+  base.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, w, h);
+  let msg = '원본 사용', panels = null;
+  if (key) {
+    try { const r = keyOut(base); if (r.ok) { panels = findPanels(base); msg = `배경 제거 ${Math.round(r.ratio * 100)}%`; } else msg = '배경을 찾지 못해 원본 사용'; }
+    catch (e) { msg = '배경 제거 불가'; }
+  }
+  if (!panels) {   // 고정 비율 분할 (정면 0–31%, 뒷모습 31–60%, 클로즈업 60–100%)
+    panels = [[0, 0, 0.31 * w, h], [0.31 * w, 0, 0.6 * w, h], [0.6 * w, 0, w, h]];
+    msg += ' · 고정 비율 분할';
+  } else msg += ' · 3컷 자동 분할';
+  const [f, b, c] = panels.map(p => cropC(base, ...p));
+  return { set: { front: shot(f, 0.5, 1), back: shot(b, 0.5, 1), close: shot(c, 0.45, 0.33) }, msg };
+}
+
+// 임시 실루엣 (이미지를 넣기 전 미리보기용)
+function placeholder(o) {
+  const { skin = '#e2b9a0', suit = '#141418', hair = '#0c0c0e', long = true, shirt = null, bow = null, skirt = null, pants = false } = o;
+  const body = (g, face) => {
+    g.fillStyle = hair;
+    if (long) { g.beginPath(); g.ellipse(200, 120, 78, 110, 0, 0, 7); g.fill(); g.fillRect(124, 120, 152, 230); }
+    else { g.beginPath(); g.ellipse(200, 108, 66, 76, 0, 0, 7); g.fill(); }
+    if (face) { g.fillStyle = skin; g.beginPath(); g.ellipse(200, 122, 50, 64, 0, 0, 7); g.fill(); }
+    g.fillStyle = skin; g.fillRect(184, 176, 32, 44);
+    g.fillStyle = suit; g.beginPath(); g.moveTo(112, 214); g.lineTo(288, 214); g.lineTo(306, 520); g.lineTo(94, 520); g.closePath(); g.fill();
+    if (face && shirt) { g.fillStyle = shirt; g.beginPath(); g.moveTo(180, 214); g.lineTo(220, 214); g.lineTo(200, 330); g.closePath(); g.fill(); }
+    if (face && bow) { g.fillStyle = bow; g.beginPath(); g.moveTo(200, 232); g.lineTo(160, 212); g.lineTo(160, 256); g.closePath(); g.moveTo(200, 232); g.lineTo(240, 212); g.lineTo(240, 256); g.closePath(); g.fill(); }
+    if (!face && long) { g.fillStyle = hair; g.fillRect(128, 60, 144, 300); }
+    if (pants) { g.fillStyle = suit; g.fillRect(118, 520, 76, 440); g.fillRect(206, 520, 76, 440); g.fillStyle = '#050505'; g.fillRect(112, 950, 86, 30); g.fillRect(202, 950, 86, 30); }
+    else {
+      g.fillStyle = skirt || suit; g.fillRect(116, 520, 168, 110);
+      g.fillStyle = skin; g.fillRect(142, 630, 38, 320); g.fillRect(220, 630, 38, 320);
+      g.fillStyle = '#050505'; g.fillRect(134, 950, 50, 30); g.fillRect(216, 950, 50, 30);
+    }
+  };
+  const f = mk(400, 990); body(f.getContext('2d'), true);
+  const b = mk(400, 990); body(b.getContext('2d'), false);
+  const c = mk(800, 1000), g = c.getContext('2d');
+  g.fillStyle = hair;
+  if (long) { g.beginPath(); g.ellipse(400, 380, 290, 350, 0, 0, 7); g.fill(); g.fillRect(110, 380, 580, 420); }
+  else { g.beginPath(); g.ellipse(400, 300, 230, 250, 0, 0, 7); g.fill(); }
+  g.fillStyle = skin; g.beginPath(); g.ellipse(400, 380, 185, 235, 0, 0, 7); g.fill(); g.fillRect(335, 560, 130, 150);
+  g.fillStyle = suit; g.beginPath(); g.moveTo(20, 1000); g.lineTo(150, 720); g.lineTo(650, 720); g.lineTo(780, 1000); g.fill();
+  if (shirt) { g.fillStyle = shirt; g.beginPath(); g.moveTo(330, 720); g.lineTo(470, 720); g.lineTo(400, 900); g.fill(); }
+  if (bow) { g.fillStyle = bow; g.beginPath(); g.moveTo(400, 770); g.lineTo(300, 720); g.lineTo(300, 830); g.closePath(); g.moveTo(400, 770); g.lineTo(500, 720); g.lineTo(500, 830); g.closePath(); g.fill(); }
+  g.fillStyle = '#2a1a1a'; g.beginPath(); g.ellipse(330, 360, 32, 13, 0, 0, 7); g.ellipse(470, 360, 32, 13, 0, 0, 7); g.fill();
+  g.fillStyle = '#b86a66'; g.beginPath(); g.ellipse(400, 500, 42, 13, 0, 0, 7); g.fill();
+  return { front: shot(f, 0.5, 1), back: shot(b, 0.5, 1), close: shot(c, 0.5, 0.36) };
+}
+const CAST = [
+  placeholder({ long: true }),                                                    // 서윤
+  placeholder({ long: false, pants: true, skin: '#d8ad92' }),                     // 도현
+  placeholder({ long: true, suit: '#3a3b40', shirt: '#f2f2f2', bow: '#9aa3b5', skirt: '#9aa3b5' }), // 하린
+];
+const WIFE = 0, HUSB = 1, MGR = 2;
+
+// 인물 그리기: (x, y)는 기준점(정면·뒷모습=발끝, 클로즈업=얼굴), h=표시 높이
+function fig(who, kind, x, y, h, o = {}) {
+  const s = CAST[who][kind], im = s.img, w = h * im.width / im.height;
+  const { flip = false, alpha = 1, glow = null, blur = 0, dark = 0 } = o;
+  ctx.save(); ctx.globalAlpha *= alpha; ctx.translate(x, y); if (flip) ctx.scale(-1, 1);
+  if (kind !== 'close' && !o.noShadow) {   // 바닥 그림자
+    ctx.save(); ctx.globalAlpha *= 0.45; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(0, 0, w * 0.42, h * 0.018, 0, 0, 7); ctx.fill(); ctx.restore();
+  }
+  if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = 40; }
+  if (blur) ctx.filter = `blur(${blur}px)` + (dark ? ` brightness(${1 - dark})` : '');
+  else if (dark) ctx.filter = `brightness(${1 - dark})`;
+  ctx.drawImage(im, -w * s.fx, -h * s.fy, w, h);
+  ctx.restore();
+}
+
+// =====================================================================
+// 2) 배경 — 호텔 뤼미에르 로비 / 엘리베이터 / 12층 복도 / 1207호
+// =====================================================================
+const BW = W + 360, BH = H + 240;       // 패닝 여유
+const R = rng(1207);
+function blurCopy(c, px, bright = 1) { const o = mk(c.width, c.height), g = o.getContext('2d'); g.filter = `blur(${px}px) brightness(${bright})`; g.drawImage(c, 0, 0); return o; }
+
+const LOBBY = (() => {
+  const back = mk(BW, BH), g = back.getContext('2d'), FL = 1380;   // 바닥 시작선
+  // 벽
+  let gr = g.createLinearGradient(0, 0, 0, FL);
+  gr.addColorStop(0, '#120c08'); gr.addColorStop(0.5, '#3a2616'); gr.addColorStop(1, '#5b3d22');
+  g.fillStyle = gr; g.fillRect(0, 0, BW, FL);
+  // 뒤쪽 통창 (밤 도시)
+  for (let i = 0; i < 4; i++) {
+    const x = 90 + i * 350, y = 380, w = 260, h = 760;
+    const wg = g.createLinearGradient(0, y, 0, y + h); wg.addColorStop(0, '#060b1e'); wg.addColorStop(1, '#1b2146');
+    g.fillStyle = wg; g.fillRect(x, y, w, h);
+    for (let k = 0; k < 90; k++) { g.fillStyle = R() < 0.7 ? `rgba(255,205,140,${0.3 + R() * 0.6})` : `rgba(170,210,255,${0.3 + R() * 0.6})`; g.fillRect(x + R() * w, y + 300 + R() * (h - 300), 3, 4); }
+    g.strokeStyle = '#b8894a'; g.lineWidth = 10; g.strokeRect(x, y, w, h);
+    g.fillStyle = '#b8894a'; g.fillRect(x + w / 2 - 3, y, 6, h); g.fillRect(x, y + h * 0.45, w, 6);
+  }
+  // 금빛 기둥
+  for (const x of [20, 640, 1260]) {
+    const pg = g.createLinearGradient(x, 0, x + 150, 0);
+    pg.addColorStop(0, '#4a3014'); pg.addColorStop(0.35, '#e8c27a'); pg.addColorStop(0.6, '#a67a3c'); pg.addColorStop(1, '#3a250f');
+    g.fillStyle = pg; g.fillRect(x, 150, 150, FL - 150);
+    g.fillStyle = '#d9b06a'; g.fillRect(x - 16, 150, 182, 30); g.fillRect(x - 16, FL - 40, 182, 40);
+  }
+  // 샹들리에
+  const chand = (cx, cy, s) => {
+    g.strokeStyle = 'rgba(230,200,140,.6)'; g.lineWidth = 3; g.beginPath(); g.moveTo(cx, 0); g.lineTo(cx, cy - 60 * s); g.stroke();
+    const lg = g.createRadialGradient(cx, cy, 0, cx, cy, 380 * s); lg.addColorStop(0, 'rgba(255,220,150,.55)'); lg.addColorStop(1, 'rgba(255,200,120,0)');
+    g.fillStyle = lg; g.fillRect(cx - 400 * s, cy - 400 * s, 800 * s, 800 * s);
+    for (let ring = 0; ring < 3; ring++) for (let k = 0; k < 14 - ring * 3; k++) {
+      const a = k / (14 - ring * 3) * Math.PI * 2, rx = (150 - ring * 45) * s, x = cx + Math.cos(a) * rx, y = cy + ring * 50 * s + Math.sin(a) * rx * 0.25;
+      g.fillStyle = 'rgba(255,240,200,.35)'; circle(g, x, y, 14 * s); g.fillStyle = '#fff6dc'; circle(g, x, y, 5 * s);
+      g.strokeStyle = 'rgba(255,235,190,.35)'; g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + 36 * s); g.stroke();
+    }
+  };
+  chand(BW / 2, 250, 1.3); chand(260, 200, 0.8); chand(BW - 260, 200, 0.8);
+  // 대리석 바닥 (원근 격자 + 반사광)
+  gr = g.createLinearGradient(0, FL, 0, BH); gr.addColorStop(0, '#6b5238'); gr.addColorStop(1, '#1e150d');
+  g.fillStyle = gr; g.fillRect(0, FL, BW, BH - FL);
+  g.strokeStyle = 'rgba(255,225,170,.18)'; g.lineWidth = 2;
+  for (let i = -12; i <= 12; i++) { g.beginPath(); g.moveTo(BW / 2 + i * 60, FL); g.lineTo(BW / 2 + i * 380, BH); g.stroke(); }
+  for (let k = 1; k < 9; k++) { const y = FL + (BH - FL) * Math.pow(k / 9, 1.8); g.beginPath(); g.moveTo(0, y); g.lineTo(BW, y); g.stroke(); }
+  const rf = g.createRadialGradient(BW / 2, FL + 120, 0, BW / 2, FL + 120, 700); rf.addColorStop(0, 'rgba(255,215,150,.35)'); rf.addColorStop(1, 'rgba(255,215,150,0)');
+  g.fillStyle = rf; g.fillRect(0, FL, BW, BH - FL);
+
+  // 프런트 데스크 (인물 앞에 그리는 전경 레이어)
+  const desk = mk(BW, BH), d = desk.getContext('2d'), DY = 1180;
+  const dg = d.createLinearGradient(0, DY, 0, DY + 320); dg.addColorStop(0, '#2a170c'); dg.addColorStop(1, '#120a05');
+  d.fillStyle = dg; d.fillRect(BW / 2 - 560, DY, 1120, 320);
+  d.fillStyle = '#e2b872'; d.fillRect(BW / 2 - 580, DY - 18, 1160, 22); d.fillRect(BW / 2 - 560, DY + 150, 1120, 6);
+  d.save(); d.shadowColor = '#ffcf7a'; d.shadowBlur = 20; d.fillStyle = '#f2cf86';
+  d.font = `600 54px ${SERIF}`; d.textAlign = 'center'; d.textBaseline = 'middle'; if ('letterSpacing' in d) d.letterSpacing = '14px';
+  d.fillText('HOTEL LUMIÈRE', BW / 2, DY + 82); d.restore();
+  d.fillStyle = 'rgba(255,230,180,.35)'; circle(d, BW / 2 + 430, DY - 40, 26); d.fillStyle = '#c9a46a'; d.fillRect(BW / 2 + 425, DY - 40, 10, 22);  // 벨
+  // 화분
+  for (const px of [120, BW - 240]) {
+    d.fillStyle = '#1a120b'; d.fillRect(px, FL - 120, 120, 160);
+    for (let k = 0; k < 26; k++) { d.fillStyle = `rgba(${30 + R() * 30},${70 + R() * 50},${40 + R() * 30},1)`; d.beginPath(); d.ellipse(px + 60 + (R() - .5) * 150, FL - 160 - R() * 260, 16, 50, (R() - .5) * 2, 0, 7); d.fill(); }
+  }
+  return { back, desk, backBlur: blurCopy(back, 10, 0.8), FL, DY };
+})();
+
+const ELEV = (() => {
+  const c = mk(BW, BH), g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, BW, 0);
+  gr.addColorStop(0, '#2a2622'); gr.addColorStop(0.5, '#6d665c'); gr.addColorStop(1, '#2a2622');
+  g.fillStyle = gr; g.fillRect(0, 0, BW, BH);
+  for (let x = 0; x < BW; x += 3) { g.fillStyle = `rgba(255,255,255,${R() * 0.05})`; g.fillRect(x, 0, 1, BH); }
+  // 문
+  const dx = BW / 2 - 400, dy = 420;
+  g.fillStyle = '#9c9384'; g.fillRect(dx - 30, dy - 30, 860, 1500);
+  const dg = g.createLinearGradient(dx, 0, dx + 800, 0);
+  dg.addColorStop(0, '#6f685d'); dg.addColorStop(0.25, '#c9c0b0'); dg.addColorStop(0.5, '#7a7366'); dg.addColorStop(0.75, '#c9c0b0'); dg.addColorStop(1, '#6f685d');
+  g.fillStyle = dg; g.fillRect(dx, dy, 800, 1470);
+  g.fillStyle = '#2a2622'; g.fillRect(BW / 2 - 3, dy, 6, 1470);
+  // 층 표시창 자리
+  g.fillStyle = '#0c0b0a'; rrect(g, BW / 2 - 150, 200, 300, 160, 18); g.fill();
+  g.fillStyle = '#e8c27a'; g.fillRect(BW / 2 - 160, 380, 320, 6);
+  // 천장 조명
+  const lg = g.createRadialGradient(BW / 2, -100, 0, BW / 2, -100, 1300); lg.addColorStop(0, 'rgba(255,235,200,.35)'); lg.addColorStop(1, 'rgba(0,0,0,.35)');
+  g.fillStyle = lg; g.fillRect(0, 0, BW, BH);
+  return { c };
+})();
+
+const HALL = (() => {
+  const c = mk(BW, BH), g = c.getContext('2d'), vx = BW / 2, vy = 820;
+  g.fillStyle = '#1c120c'; g.fillRect(0, 0, BW, BH);
+  const wall = (pts, col) => { g.fillStyle = col; g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fill(); };
+  wall([[0, 0], [vx - 170, vy - 260], [vx - 170, vy + 260], [0, BH]], '#4a2e1b');
+  wall([[BW, 0], [vx + 170, vy - 260], [vx + 170, vy + 260], [BW, BH]], '#3e2616');
+  wall([[0, 0], [BW, 0], [vx + 170, vy - 260], [vx - 170, vy - 260]], '#241710');
+  wall([[0, BH], [BW, BH], [vx + 170, vy + 260], [vx - 170, vy + 260]], '#4a1216');     // 붉은 카펫
+  g.strokeStyle = 'rgba(230,180,110,.25)'; g.lineWidth = 4;
+  for (let k = 0; k < 14; k++) { const u = Math.pow(k / 14, 2); g.beginPath(); g.moveTo(lerp(0, vx - 170, 1 - u), lerp(BH, vy + 260, 1 - u)); g.lineTo(lerp(BW, vx + 170, 1 - u), lerp(BH, vy + 260, 1 - u)); g.stroke(); }
+  // 벽등
+  for (let k = 1; k < 6; k++) for (const side of [-1, 1]) {
+    const u = 1 - k / 6, x = vx + side * lerp(170, vx, u), y = lerp(vy - 60, 400, u), s = lerp(0.3, 1.4, u);
+    const lg = g.createRadialGradient(x, y, 0, x, y, 200 * s); lg.addColorStop(0, 'rgba(255,200,130,.6)'); lg.addColorStop(1, 'rgba(255,200,130,0)');
+    g.fillStyle = lg; g.fillRect(x - 200 * s, y - 200 * s, 400 * s, 400 * s); g.fillStyle = '#ffe2b0'; circle(g, x, y, 10 * s);
+  }
+  // 정면 1207호 문
+  const dx = vx - 150, dy = vy - 230;
+  g.fillStyle = '#2b150c'; g.fillRect(dx - 16, dy - 16, 332, 506);
+  const dg = g.createLinearGradient(dx, 0, dx + 300, 0); dg.addColorStop(0, '#4d2a16'); dg.addColorStop(0.5, '#6e4024'); dg.addColorStop(1, '#4d2a16');
+  g.fillStyle = dg; g.fillRect(dx, dy, 300, 490);
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 4; g.strokeRect(dx + 30, dy + 30, 240, 190); g.strokeRect(dx + 30, dy + 250, 240, 210);
+  g.fillStyle = '#e2b872'; rrect(g, vx - 58, dy + 100, 116, 52, 8); g.fill();
+  g.fillStyle = '#2b150c'; g.font = `700 36px ${SERIF}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('1207', vx, dy + 127);
+  g.fillStyle = '#e2b872'; g.fillRect(dx + 250, dy + 260, 30, 10);
+  g.fillStyle = 'rgba(255,215,150,.9)'; g.fillRect(dx, dy + 486, 300, 4);   // 문틈 불빛
+  return { c, door: { x: vx, y: vy } };
+})();
+
+const ROOM = (() => {
+  const c = mk(BW, BH), g = c.getContext('2d');
+  let gr = g.createLinearGradient(0, 0, 0, BH); gr.addColorStop(0, '#1d0f10'); gr.addColorStop(0.62, '#3b1c18'); gr.addColorStop(0.62, '#2a1410'); gr.addColorStop(1, '#120807');
+  g.fillStyle = gr; g.fillRect(0, 0, BW, BH);
+  // 창밖 야경
+  const wx = 180, wy = 300, ww = BW - 360, wh = 700;
+  const wg = g.createLinearGradient(0, wy, 0, wy + wh); wg.addColorStop(0, '#070b20'); wg.addColorStop(1, '#241b44'); g.fillStyle = wg; g.fillRect(wx, wy, ww, wh);
+  for (let x = wx; x < wx + ww;) { const bw = 40 + R() * 80, bh = 80 + R() * 380; g.fillStyle = '#0a0c1d'; g.fillRect(x, wy + wh - bh, bw, bh);
+    for (let k = 0; k < bh * bw / 700; k++) { g.fillStyle = `rgba(255,210,140,${0.3 + R() * 0.6})`; g.fillRect(x + R() * bw, wy + wh - bh + R() * bh, 3, 4); } x += bw + 4; }
+  g.strokeStyle = '#6b4a2a'; g.lineWidth = 16; g.strokeRect(wx, wy, ww, wh);
+  // 커튼
+  for (const [x0, dir] of [[wx - 60, 1], [wx + ww + 60, -1]]) for (let k = 0; k < 6; k++) {
+    g.fillStyle = k % 2 ? '#5a1620' : '#72202b'; g.fillRect(x0 + dir * k * 22 - (dir < 0 ? 22 : 0), 220, 22, 1000);
+  }
+  // 현수막
+  g.save(); g.shadowColor = '#ffcf7a'; g.shadowBlur = 24; g.fillStyle = '#f5d28e';
+  g.font = `700 70px ${SERIF}`; g.textAlign = 'center'; g.textBaseline = 'middle'; if ('letterSpacing' in g) g.letterSpacing = '6px';
+  g.fillText('HAPPY 7th ANNIVERSARY', BW / 2, 200); g.restore();
+  // 침대 + 장미 하트
+  g.fillStyle = '#e9e2d6'; g.fillRect(170, 1250, BW - 340, 260); g.fillStyle = '#4a1b1b'; g.fillRect(150, 1170, BW - 300, 90);
+  g.fillStyle = '#c21d3a';
+  for (let k = 0; k < 90; k++) { const a = k / 90 * Math.PI * 2, hx = 16 * Math.pow(Math.sin(a), 3), hy = -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)); circle(g, BW / 2 + hx * 16, 1360 + hy * 12, 12); }
+  // 바닥 꽃잎
+  for (let k = 0; k < 160; k++) { g.fillStyle = `rgba(${190 + R() * 50},${20 + R() * 30},${40 + R() * 30},.9)`; g.beginPath(); g.ellipse(R() * BW, 1560 + R() * 660, 10, 6, R() * 3, 0, 7); g.fill(); }
+  return { c, blur: blurCopy(c, 12, 0.85) };
+})();
+const BALLOONS = Array.from({ length: 14 }, (_, i) => ({ x: hash(i * 3.3) * W, y: 260 + hash(i * 7.1) * 700, r: 50 + hash(i * 2.2) * 40, c: ['#f2c26b', '#f7b6c8', '#ffffff', '#d94f70'][i % 4], ph: hash(i) * 6 }));
+const CANDLES = Array.from({ length: 24 }, (_, i) => ({ x: 60 + (i % 12) * 88 + hash(i) * 30, y: 1600 + Math.floor(i / 12) * 180 + hash(i * 5) * 40 }));
+
+function drawBG(c, t, a, b, zoom0, zoom1, px0 = 0, px1 = 0, py = 0) {
+  const u = P(t, a, b), z = lerp(zoom0, zoom1, u), ox = lerp(px0, px1, u);
+  const w = BW * z, h = BH * z;
+  ctx.drawImage(c, CX - w / 2 + ox, CY - h / 2 + py, w, h);
+}
+function candles(t) {
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (const [i, c] of CANDLES.entries()) {
+    const f = 0.75 + 0.25 * Math.sin(t * 13 + i) * Math.sin(t * 7.3 + i * 2);
+    const lg = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 90 * f); lg.addColorStop(0, 'rgba(255,190,100,.5)'); lg.addColorStop(1, 'rgba(255,160,80,0)');
+    ctx.fillStyle = lg; ctx.fillRect(c.x - 90, c.y - 90, 180, 180);
+    ctx.fillStyle = '#fff1c8'; ctx.beginPath(); ctx.ellipse(c.x, c.y - 6, 5, 11 * f, 0, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+  for (const c of CANDLES) { ctx.fillStyle = '#efe6d6'; ctx.fillRect(c.x - 9, c.y, 18, 36); }
+}
+function balloons(t, alpha = 1) {
+  ctx.save(); ctx.globalAlpha = alpha;
+  for (const b of BALLOONS) {
+    const y = b.y + Math.sin(t * 1.3 + b.ph) * 14, x = b.x + Math.sin(t * 0.8 + b.ph) * 8;
+    ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y + b.r); ctx.quadraticCurveTo(x + 20, y + b.r + 120, x, y + b.r + 260); ctx.stroke();
+    const g = ctx.createRadialGradient(x - b.r * .35, y - b.r * .35, 4, x, y, b.r); g.addColorStop(0, '#fff'); g.addColorStop(0.25, b.c); g.addColorStop(1, 'rgba(0,0,0,.4)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y, b.r * 0.88, b.r, 0, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+function confetti(t, t0) {
+  const u = t - t0; if (u < 0 || u > 5) return;
+  for (let i = 0; i < 220; i++) {
+    const a = -Math.PI / 2 + (hash(i * 1.9) - 0.5) * 2.4, v = 900 + hash(i * 4.4) * 1300;
+    const x = CX + Math.cos(a) * v * u * 0.6 + Math.sin(u * 3 + i) * 30, y = 1500 + Math.sin(a) * v * u + 700 * u * u;
+    if (y > H + 40) continue;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(u * 8 + i); ctx.globalAlpha = clamp(1.2 - u / 5);
+    ctx.fillStyle = ['#f2c26b', '#ff6f91', '#ffffff', '#7ad7f0', '#c9a2ff'][i % 5]; ctx.fillRect(-10, -5, 20, 10 * Math.abs(Math.cos(u * 6 + i))); ctx.restore();
+  }
+}
+function phoneUI(t, t0) {
+  const u = t - t0, buzz = (u > 0.4 && u < 1.0) || (u > 1.4 && u < 2.0) ? Math.sin(t * 90) * 8 : 0;
+  const pw = 700, ph = 1360, x = CX - pw / 2 + buzz, y = 300 + (1 - outC(P(u, 0, 0.5))) * 400;
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.8)'; ctx.shadowBlur = 60;
+  ctx.fillStyle = '#0b0b0e'; rrect(ctx, x, y, pw, ph, 80); ctx.fill(); ctx.restore();
+  const sg = ctx.createLinearGradient(0, y, 0, y + ph); sg.addColorStop(0, '#1b1530'); sg.addColorStop(1, '#3a1822');
+  ctx.fillStyle = sg; rrect(ctx, x + 22, y + 22, pw - 44, ph - 44, 62); ctx.fill();
+  ctx.fillStyle = '#000'; rrect(ctx, CX - 90 + buzz, y + 44, 180, 44, 22); ctx.fill();
+  text('9:07', CX + buzz, y + 240, 150, '#fff', { weight: 300, font: FONT });
+  text('9월 29일 화요일 · 결혼기념일', CX + buzz, y + 340, 34, 'rgba(255,255,255,.8)', { weight: 500 });
+  const nu = outC(P(u, 0.3, 0.8));
+  if (nu > 0) {
+    const ny = y + 470 + (1 - nu) * -60;
+    ctx.save(); ctx.globalAlpha = nu; ctx.fillStyle = 'rgba(255,255,255,.92)'; rrect(ctx, x + 50, ny, pw - 100, 250, 36); ctx.fill();
+    ctx.fillStyle = '#34c759'; rrect(ctx, x + 80, ny + 36, 70, 70, 18); ctx.fill(); ctx.restore();
+    text('메시지', x + 170, ny + 58, 30, '#555', { align: 'left', weight: 600, alpha: nu });
+    text('지금', x + pw - 80, ny + 58, 28, '#888', { align: 'right', weight: 500, alpha: nu });
+    text('J ♥', x + 80, ny + 140, 40, '#111', { align: 'left', weight: 800, alpha: nu });
+    text('오늘 못 와? 1208호에서 기다릴게.', x + 80, ny + 200, 34, '#222', { align: 'left', weight: 500, alpha: nu });
+  }
+}
+
+// =====================================================================
+// 3) 대본 자막 — who: 'N'=내레이션, 그 외=화자 이름
+// =====================================================================
+const SUBS = [
+  [4.3, 8.8, 'N', '야근한다던 남편이… 왜 호텔에 있는 걸까.'],
+  [9.3, 13.8, 'N', '처음 보는 여자가 남편에게 카드키를 건넨다.'],
+  [14.4, 17.8, '서윤', '(작게) …1207호.'],
+  [18.3, 20.6, '도현', '그 사람은 절대 모르게 해 주세요.'],
+  [20.7, 22.9, '하린', '걱정 마세요. 준비는 다 끝났어요.'],
+  [23.4, 26.8, '서윤', '7년이… 전부 거짓말이었어?'],
+  [27.6, 31.8, 'N', '12층. 심장 소리가 엘리베이터를 가득 채웠다.'],
+  [32.3, 34.5, 'N', '그리고, 문을 열자—'],
+  [35.0, 36.8, 'N', '(펑—!)'],
+  [37.0, 39.9, '도현', '서프라이즈. 7주년 축하해, 서윤아.'],
+  [40.3, 43.9, '하린', '이벤트 매니저 하린입니다. 남편분이 3주 동안 준비하셨어요.'],
+  [44.4, 46.9, '서윤', '…바보. 난 진짜…'],
+  [47.1, 49.8, 'N', '오해였다. 모든 게.'],
+  [50.6, 53.8, 'N', '그 순간, 서윤의 휴대폰이 울렸다.'],
+  [54.6, 57.4, 'N', '진짜 반전은… 지금부터였다.'],
+];
+function wrap(str, max, size) {
+  ctx.save(); ctx.font = `700 ${size}px ${KFONT}`;
+  const out = []; let line = '';
+  for (const w of str.split(' ')) { const tst = line ? line + ' ' + w : w; if (ctx.measureText(tst).width > max && line) { out.push(line); line = w; } else line = tst; }
+  out.push(line); ctx.restore(); return out;
+}
+function drawSub(t) {
+  const s = SUBS.find(s => t >= s[0] && t < s[1]); if (!s) return;
+  const [a, b, who, str] = s, al = Math.min(P(t, a, a + 0.2), 1 - P(t, b - 0.2, b));
+  const size = 54, lines = wrap(str, W - 180, size), y0 = 1520;
+  const bh = lines.length * 76 + 44;
+  ctx.save(); ctx.globalAlpha = al * 0.62; ctx.fillStyle = '#000'; rrect(ctx, 60, y0 - 38, W - 120, bh, 22); ctx.fill(); ctx.restore();
+  if (who !== 'N') {
+    const col = { 서윤: '#ff8fa3', 도현: '#8fc7ff', 하린: '#ffd48a' }[who] || '#fff';
+    ctx.save(); ctx.globalAlpha = al; ctx.fillStyle = col; rrect(ctx, 90, y0 - 90, 150, 56, 28); ctx.fill(); ctx.restore();
+    text(who, 165, y0 - 62, 32, '#111', { weight: 800, alpha: al });
+  }
+  lines.forEach((l, i) => text(l, CX, y0 + 20 + i * 76, size, who === 'N' ? '#f2f2f2' : '#fff',
+    { weight: who === 'N' ? 500 : 800, alpha: al, font: who === 'N' ? SERIF : KFONT, shadow: 8 }));
+}
+
+// =====================================================================
+// 4) 컷 구성
+// =====================================================================
+function shake(amt, t) { ctx.translate((hash(t * 97) - .5) * amt, (hash(t * 71 + 3) - .5) * amt); }
+function grade(col, a, mode = 'soft-light') { ctx.save(); ctx.globalCompositeOperation = mode; ctx.globalAlpha = a; ctx.fillStyle = col; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+function vign(a = 0.65) {
+  const g = ctx.createRadialGradient(CX, CY, H * 0.28, CX, CY, H * 0.75); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${a})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function heart(t, t0, t1, period) {
+  if (t < t0 || t > t1) return 0;
+  const ph = ((t - t0) % period) / period; return Math.exp(-ph * 14) + 0.6 * Math.exp(-Math.max(0, ph - 0.22) * 14) * (ph > 0.22);
+}
+const HB = t => Math.max(heart(t, 14, 18, 0.85), heart(t, 27, 30, 0.7), heart(t, 30, 34.5, 0.5));
+
+const CUTS = [
+  [0, 4, t => {            // 훅
+    ctx.drawImage(LOBBY.backBlur, -180, -120); ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, W, H);
+    fig(WIFE, 'close', CX, 820, lerp(1500, 1700, P(t, 0, 4)));
+    grade('#2a3a66', 0.35);
+    const a = outC(P(t, 0.3, 0.9));
+    text('결혼 7주년 기념일,', CX, 300, 76, '#fff', { weight: 900, stroke: 14, alpha: a });
+    text('남편이 호텔에 있었다', CX, 400, 92, '#ffd54a', { weight: 900, stroke: 16, alpha: outC(P(t, 1.0, 1.6)) });
+  }],
+  [4, 9, t => {            // 로비 와이드 — 남편이 프런트로 걸어감
+    drawBG(LOBBY.back, t, 4, 9, 1.0, 1.06, 60, -60);
+    fig(MGR, 'front', CX + 40, LOBBY.DY + 300, 820, { noShadow: true });
+    drawBG(LOBBY.desk, t, 4, 9, 1.0, 1.06, 60, -60);
+    const u = ease(P(t, 4, 9));
+    fig(HUSB, 'back', lerp(CX - 260, CX - 120, u), lerp(2050, 1720, u), lerp(1500, 1050, u) * (1 + Math.sin(t * 7) * 0.004));
+    grade('#6b4a1a', 0.3);
+  }],
+  [9, 14, t => {           // 프런트 — 카드키 건네기
+    drawBG(LOBBY.back, t, 9, 14, 1.45, 1.52, -40, 20, -120);
+    fig(MGR, 'front', CX + 150, 1880, 1480, { noShadow: true });
+    drawBG(LOBBY.desk, t, 9, 14, 1.45, 1.52, -40, 20, 180);
+    const cu = ease(P(t, 10.4, 12));
+    if (t > 10.2) {
+      ctx.save(); ctx.translate(lerp(CX + 60, CX - 120, cu), lerp(1180, 1260, cu)); ctx.rotate(lerp(-0.1, 0.25, cu));
+      ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 20; ctx.fillStyle = '#1b1b1f'; rrect(ctx, -90, -56, 180, 112, 12); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#e2b872'; ctx.fillRect(-90, -20, 180, 12);
+      ctx.font = `700 26px ${SERIF}`; ctx.textAlign = 'center'; ctx.fillText('LUMIÈRE · 1207', 0, 34); ctx.restore();
+    }
+    fig(HUSB, 'back', CX - 330, 2350, 2000, { blur: 3, noShadow: true });
+    grade('#6b4a1a', 0.3);
+  }],
+  [14, 18, t => {          // 기둥 뒤에 숨은 아내
+    ctx.save(); shake(6, t);
+    ctx.drawImage(LOBBY.backBlur, -300 + (t - 14) * 20, -60);
+    fig(WIFE, 'close', CX + 90, 860, 1650 * (1 + 0.02 * HB(t)));
+    const pg = ctx.createLinearGradient(0, 0, 330, 0); pg.addColorStop(0, '#1d1206'); pg.addColorStop(0.6, '#8a6230'); pg.addColorStop(1, 'rgba(60,40,15,0)');
+    ctx.fillStyle = pg; ctx.fillRect(-20, -20, 330, H + 40);
+    ctx.restore();
+    grade('#20305a', 0.4); vign(0.5 + 0.3 * HB(t));
+  }],
+  [18, 23, t => {          // 밀담 — 상하 분할
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, CY - 4); ctx.clip();
+    ctx.drawImage(LOBBY.backBlur, -200, -700); fig(HUSB, 'close', CX - 40, 470, 1150 + (t - 18) * 20); grade('#6b4a1a', 0.3); ctx.restore();
+    ctx.save(); ctx.beginPath(); ctx.rect(0, CY + 4, W, CY); ctx.clip();
+    ctx.drawImage(LOBBY.backBlur, -100, 200); fig(MGR, 'close', CX + 40, CY + 450, 1150 + (t - 18) * 20); grade('#6b4a1a', 0.3); ctx.restore();
+    ctx.fillStyle = '#e2b872'; ctx.fillRect(0, CY - 4, W, 8);
+    const sp = t < 20.7 ? 0 : 1;   // 말하는 사람 강조
+    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(0, sp ? 0 : CY + 4, W, CY - 4);
+  }],
+  [23, 27, t => {          // 아내의 눈물
+    ctx.drawImage(LOBBY.backBlur, -250, -80);
+    fig(WIFE, 'close', CX, 900, lerp(1700, 1950, P(t, 23, 27)));
+    grade('#1a2f66', 0.5); vign(0.7);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';   // 번지는 빛망울
+    for (let i = 0; i < 10; i++) { const x = hash(i * 3) * W, y = hash(i * 5) * H * 0.7, r = 60 + hash(i) * 80;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, 'rgba(255,210,150,.12)'); g.addColorStop(1, 'rgba(255,210,150,0)'); ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r); }
+    ctx.restore();
+  }],
+  [27, 32, t => {          // 엘리베이터
+    ctx.save(); shake(2 + 4 * HB(t), t);
+    drawBG(ELEV.c, t, 27, 32, 1.0, 1.1);
+    const fl = Math.min(12, 1 + Math.floor(P(t, 27.3, 31.2) * 11.99));
+    const z = lerp(1.0, 1.1, P(t, 27, 32));
+    ctx.save(); ctx.shadowColor = '#ff9a3c'; ctx.shadowBlur = 24;
+    text(String(fl), CX, CY + (200 - BH / 2 + 80) * z, 110 * z, '#ffae5a', { weight: 700, font: FONT }); ctx.restore();
+    fig(WIFE, 'back', CX, 2000, 1750);
+    ctx.restore();
+    grade('#b08a5a', 0.2); vign(0.55 + 0.3 * HB(t));
+  }],
+  [32, 34.6, t => {        // 1207호 문 앞 → 문을 열자
+    ctx.save(); if (t > 34.5) shake(40 * Math.exp(-(t - 34.5) * 5), t);
+    const z = lerp(1.0, 1.5, ease(P(t, 32, 34.6)));
+    drawBG(HALL.c, t, 32, 36, z, z, 0, 0, (1 - z) * 60);
+    fig(WIFE, 'back', CX - 120, 2250 + (z - 1) * 300, 1600 * (1 + (z - 1) * 0.3), { blur: 2 });
+    ctx.restore();
+    grade('#5a1a14', 0.3); vign(0.7);
+  }],
+  [34.6, 40, t => {        // 반전① 서프라이즈 — 남편
+    ctx.drawImage(ROOM.blur, -180, -120); balloons(t, 0.8); candles(t);
+    fig(HUSB, 'close', CX, 900, lerp(1500, 1600, P(t, 34.6, 40)));
+    confetti(t, 34.65); grade('#ffb36b', 0.3);
+  }],
+  [40, 44, t => {          // 하린 — 이벤트 매니저
+    drawBG(ROOM.c, t, 40, 44, 1.0, 1.05, 50, -50); balloons(t); candles(t);
+    fig(MGR, 'front', CX + 40, 1760, 1300);
+    grade('#ffb36b', 0.25);
+  }],
+  [44, 50, t => {          // 아내 — 안도
+    ctx.drawImage(ROOM.blur, -150, -80); balloons(t, 0.6);
+    fig(WIFE, 'close', CX, 880, lerp(1650, 1750, P(t, 44, 50)));
+    grade('#ffb36b', 0.35);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 40; i++) { const x = hash(i * 2.7) * W, y = (hash(i * 8.1) * H + t * 40) % H; ctx.fillStyle = `rgba(255,220,170,${0.3 * (0.5 + 0.5 * Math.sin(t * 3 + i))})`; circle(ctx, x, y, 3 + hash(i) * 4); }
+    ctx.restore();
+  }],
+  [50, 54, t => {          // 반전② 휴대폰
+    ctx.drawImage(ROOM.blur, -180, -120); ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, W, H);
+    phoneUI(t, 50.2); vign(0.6);
+  }],
+  [54, 60, t => {          // 엔딩 — 아내의 미소, 2화 예고
+    ctx.drawImage(ROOM.blur, -150, -80);
+    fig(WIFE, 'close', CX, 880, lerp(1750, 2100, ease(P(t, 54, 58))));
+    grade('#8a0f22', 0.55); grade('#000', 0.25, 'multiply'); vign(0.8);
+    if (t > 57.6) {
+      const a = outC(P(t, 57.6, 58.1)); ctx.fillStyle = `rgba(0,0,0,${0.7 * a})`; ctx.fillRect(0, 0, W, H);
+      text('1207호의 비밀', CX, CY - 120, 96, '#fff', { weight: 900, font: SERIF, alpha: a, shadow: 20 });
+      text('EP.2에서 계속', CX, CY + 10, 60, '#ff5a6e', { weight: 800, alpha: a });
+      const b = P(t, 58.4, 58.8);
+      ctx.save(); ctx.globalAlpha = b; ctx.fillStyle = '#ff2d55'; rrect(ctx, CX - 250, CY + 150, 500, 100, 50); ctx.fill(); ctx.restore();
+      text('팔로우하고 다음 화 보기', CX, CY + 200, 40, '#fff', { weight: 800, alpha: b });
+    }
+  }],
+];
+// 컷 전환 효과: 기본 암전 컷(0.12s), 특정 지점은 플래시
+const FLASH = { 34.6: 1, 50: 0.6 };
+
+function render(t) {
+  t = clamp(t, 0, DUR - 1e-4);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none'; ctx.shadowBlur = 0;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const cut = CUTS.find(c => t >= c[0] && t < c[1]) || CUTS[CUTS.length - 1];
+  ctx.save(); cut[2](t); ctx.restore();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.filter = 'none';
+
+  // 전환
+  const dt = t - cut[0], left = cut[1] - t;
+  if (FLASH[cut[0]]) { const f = FLASH[cut[0]] * Math.exp(-dt * 5); if (f > 0.01) { ctx.fillStyle = `rgba(255,255,255,${f})`; ctx.fillRect(0, 0, W, H); } }
+  else if (cut[0] > 0 && dt < 0.12) { ctx.fillStyle = `rgba(0,0,0,${1 - dt / 0.12})`; ctx.fillRect(0, 0, W, H); }
+  if (t > 34.2 && t < 34.6) { const f = P(t, 34.2, 34.5); ctx.fillStyle = `rgba(255,248,235,${f})`; ctx.fillRect(0, 0, W, H); }
+  if (left < 0.1 && !FLASH[cut[1]] && cut[1] < DUR && cut[1] !== 34.6) { ctx.fillStyle = `rgba(0,0,0,${1 - left / 0.1})`; ctx.fillRect(0, 0, W, H); }
+
+  drawSub(t);
+
+  // 쇼츠 상단 고정 헤더
+  if (t > 4) {
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, 170);
+    text('호텔 로비 불륜 반전 | 1207호의 비밀 EP.1', CX, 110, 38, '#fff', { weight: 800 });
+  }
+  // 진행 바
+  ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(0, H - 8, W, 8);
+  ctx.fillStyle = '#ffd48a'; ctx.fillRect(0, H - 8, W * t / DUR, 8);
+
+  const fo = P(t, 59.3, 60); if (fo > 0) { ctx.fillStyle = `rgba(0,0,0,${fo})`; ctx.fillRect(0, 0, W, H); }
+}
+window.renderAt = render;
+
+// =====================================================================
+// 5) 음악·효과음 — 긴장(A단조) → 심장박동 → 문 충격 → 따뜻함(C장조) → 어두운 반전
+// =====================================================================
+async function makeAudio() {
+  const SR = 48000, oc = new OfflineAudioContext(2, SR * DUR, SR), R2 = rng(77);
+  const nb = oc.createBuffer(1, SR * 2, SR); { const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = R2() * 2 - 1; }
+  const comp = oc.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+  const master = oc.createGain(); master.gain.value = 0.85; master.connect(comp); comp.connect(oc.destination);
+  const ir = oc.createBuffer(2, SR * 3, SR);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = (R2() * 2 - 1) * Math.pow(1 - i / d.length, 2.5); }
+  const verb = oc.createConvolver(); verb.buffer = ir; const vg = oc.createGain(); vg.gain.value = 0.35; verb.connect(vg); vg.connect(master);
+  const bus = oc.createGain(); bus.connect(master); bus.connect(verb);
+  const mf = m => 440 * Math.pow(2, (m - 69) / 12);
+
+  function pad(t, len, notes, { v = 0.04, cut = 900, type = 'sawtooth', a = 1.2, r = 1.5 } = {}) {
+    const f = oc.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cut;
+    const g = oc.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v, t + a); g.gain.setValueAtTime(v, t + len); g.gain.linearRampToValueAtTime(0.0001, t + len + r);
+    f.connect(g); g.connect(bus);
+    for (const m of notes) for (const dt of [-8, 8]) { const o = oc.createOscillator(); o.type = type; o.frequency.value = mf(m); o.detune.value = dt; o.connect(f); o.start(t); o.stop(t + len + r + 0.1); }
+  }
+  function piano(t, m, v = 0.12, len = 2.2) {
+    for (const [mult, vv, type] of [[1, 1, 'triangle'], [2, 0.3, 'sine'], [3, 0.1, 'sine']]) {
+      const o = oc.createOscillator(), g = oc.createGain(); o.type = type; o.frequency.value = mf(m) * mult;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v * vv, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      o.connect(g); g.connect(bus); o.start(t); o.stop(t + len + 0.05);
+    }
+  }
+  function thump(t, v = 0.7) {
+    const o = oc.createOscillator(), g = oc.createGain(); o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25); o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.3);
+  }
+  function noise(t, dur, { type = 'lowpass', f = 800, q = 0.7, v = 0.3, a = 0.005, dest = bus, f2 = null } = {}) {
+    const s = oc.createBufferSource(); s.buffer = nb; s.loop = true;
+    const fl = oc.createBiquadFilter(); fl.type = type; fl.Q.value = q; fl.frequency.setValueAtTime(f, t); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + dur);
+    const g = oc.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(fl); fl.connect(g); g.connect(dest); s.start(t, R2()); s.stop(t + dur + 0.05);
+  }
+  function hit(t, v = 0.9) {
+    noise(t, 1.2, { f: 2500, v: 0.5 * v }); thump(t, v);
+    const o = oc.createOscillator(), g = oc.createGain(); o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(28, t + 1.5);
+    g.gain.setValueAtTime(0.6 * v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 1.8); o.connect(g); g.connect(master); o.start(t); o.stop(t + 2);
+  }
+  function ding(t) { for (const m of [88, 84]) piano(t + (m === 84 ? 0.35 : 0), m, 0.09, 1.6); }
+  function buzz(t, len) {
+    const o = oc.createOscillator(), g = oc.createGain(), lfo = oc.createOscillator(), lg = oc.createGain();
+    o.type = 'square'; o.frequency.value = 160; lfo.frequency.value = 25; lg.gain.value = 0.05; lfo.connect(lg); lg.connect(g.gain);
+    g.gain.setValueAtTime(0.05, t); g.gain.setValueAtTime(0, t + len);
+    const f = oc.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 500;
+    o.connect(f); f.connect(g); g.connect(master); o.start(t); lfo.start(t); o.stop(t + len); lfo.stop(t + len);
+  }
+
+  // 0–27 긴장 (Am – F – Dm – E)
+  hit(0.15, 0.7);
+  const TENSE = [[0, 8, [45, 52, 57, 60]], [8, 6, [41, 48, 53, 57]], [14, 4, [45, 52, 57]], [18, 5, [38, 45, 50, 53]], [23, 4, [40, 47, 52, 56]]];
+  TENSE.forEach(([t, l, n]) => pad(t, l, n, { v: 0.035, cut: t >= 14 && t < 18 ? 500 : 900, a: 0.8, r: 1 }));
+  const MOTIF = [69, 72, 76, 74, 72, 71];
+  for (let i = 0; i < 18; i++) { const t = 4 + i * 0.75; if (t < 14) piano(t, MOTIF[i % 6], 0.08); }
+  for (let i = 0; i < 12; i++) piano(18.2 + i * 0.75, [74, 77, 81, 79, 77, 76][i % 6], 0.07);
+  for (let t = 4; t < 14; t += 0.375) { noise(t, 0.05, { type: 'highpass', f: 8000, v: 0.02 }); }
+  for (let t = 14; t < 18; t += 0.85) { thump(t, 0.6); thump(t + 0.19, 0.4); }
+  // 27–36 엘리베이터·복도
+  ding(27.2); pad(27, 7, [33, 45], { v: 0.05, cut: 300, a: 1 });
+  for (let t = 27; t < 30; t += 0.7) { thump(t, 0.55); thump(t + 0.16, 0.35); }
+  for (let t = 30; t < 34.5; t += 0.5) { thump(t, 0.6); thump(t + 0.13, 0.4); }
+  ding(31.6);
+  noise(30.5, 4, { type: 'bandpass', f: 300, f2: 6000, q: 2, v: 0.2, a: 3.9 });
+  hit(34.5, 1);
+  // 36–50 따뜻함 (C – G – Am – F)
+  noise(34.7, 0.3, { type: 'highpass', f: 3000, v: 0.4 });   // 폭죽
+  const WARM = [[34.8, 4.7, [48, 55, 60, 64]], [39.5, 3.5, [43, 50, 55, 59]], [43, 3.5, [45, 52, 57, 60]], [46.5, 3.5, [41, 48, 53, 57]]];
+  WARM.forEach(([t, l, n]) => pad(t, l, n, { v: 0.04, cut: 1600, type: 'triangle', a: 0.6, r: 1.2 }));
+  const BOX = [[0, 84], [0.5, 88], [1, 91], [1.5, 88]];
+  for (let bar = 0; bar < 4; bar++) for (let rep = 0; rep < 2; rep++) for (const [o, m] of BOX) {
+    const root = [0, -5, -3, -7][bar]; piano(36.5 + bar * 3.5 + rep * 1.75 + o * 0.85, m + root, 0.05, 1.2);
+  }
+  // 50–60 어두운 반전
+  hit(50, 0.9); buzz(50.6, 0.6); buzz(51.6, 0.6);
+  pad(50, 8.5, [36, 42, 43], { v: 0.06, cut: 600, a: 0.5, r: 1.5 });  // 불협 클러스터
+  for (let t = 52; t < 57.6; t += 0.5) noise(t, 0.03, { type: 'highpass', f: 5000, v: 0.08 });  // 시계
+  for (let i = 0; i < 4; i++) piano(54.5 + i * 0.8, [57, 60, 56, 57][i], 0.1, 2);
+  hit(57.6, 1);
+  pad(57.6, 1.5, [33, 40, 45], { v: 0.05, cut: 400, a: 0.05, r: 0.8 });
+  return oc.startRendering();
+}
+
+// ---- MP4 muxer (H.264 + AAC/Opus) ----
+const TE = new TextEncoder();
+const u16 = n => [(n >> 8) & 255, n & 255];
+const u32 = n => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+const full = (v, f) => [v, (f >> 16) & 255, (f >> 8) & 255, f & 255];
+const cat = parts => {
+  const arrs = parts.map(p => p instanceof Uint8Array ? p : Uint8Array.from(p));
+  const out = new Uint8Array(arrs.reduce((a, b) => a + b.length, 0));
+  let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; } return out;
+};
+const box = (type, ...parts) => { const body = cat(parts); return cat([u32(body.length + 8), TE.encode(type), body]); };
+const MATRIX = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000].flatMap(u32);
+
+function videoEntry(avcC, w, h) {
+  return box('avc1', new Array(6).fill(0), u16(1), u16(0), u16(0), u32(0), u32(0), u32(0), u16(w), u16(h),
+             u32(0x480000), u32(0x480000), u32(0), u16(1), new Array(32).fill(0), u16(0x18), u16(0xffff), box('avcC', avcC));
+}
+function audioEntry(kind, desc, sr, ch) {
+  const common = [new Array(6).fill(0), u16(1), u32(0), u32(0), u16(ch), u16(16), u16(0), u16(0), u32(sr * 65536)];
+  if (kind === 'aac') {
+    const asc = desc && desc.length ? [...desc] : [0x11, 0x90];
+    const dsi = [0x05, asc.length, ...asc];
+    const dcd = [0x04, 13 + dsi.length, 0x40, 0x15, 0, 0, 0, ...u32(192000), ...u32(192000), ...dsi];
+    const sl = [0x06, 1, 0x02];
+    const esd = [0x03, 3 + dcd.length + sl.length, 0, 1, 0, ...dcd, ...sl];
+    return box('mp4a', ...common, box('esds', full(0, 0), esd));
+  }
+  let pre = 312;
+  if (desc && desc.length >= 12 && String.fromCharCode(...desc.slice(0, 8)) === 'OpusHead') pre = desc[10] | (desc[11] << 8);
+  return box('Opus', ...common, box('dOps', [0, ch], u16(pre), u32(sr), u16(0), [0]));
+}
+function rle(ds) { const o = []; for (const d of ds) { const l = o[o.length - 1]; if (l && l[1] === d) l[0]++; else o.push([1, d]); } return o; }
+function trak(tr, id, off) {
+  const isV = tr.kind === 'video', dur = tr.deltas.reduce((a, b) => a + b, 0), durMs = Math.round(dur / tr.timescale * 1000), N = tr.samples.length;
+  const tkhd = box('tkhd', full(0, 3), u32(0), u32(0), u32(id), u32(0), u32(durMs), u32(0), u32(0),
+                   u16(0), u16(0), u16(isV ? 0 : 0x100), u16(0), MATRIX, u32(isV ? tr.w * 65536 : 0), u32(isV ? tr.h * 65536 : 0));
+  const mdhd = box('mdhd', full(0, 0), u32(0), u32(0), u32(tr.timescale), u32(dur), u16(0x55c4), u16(0));
+  const hdlr = box('hdlr', full(0, 0), u32(0), TE.encode(isV ? 'vide' : 'soun'), u32(0), u32(0), u32(0), TE.encode(isV ? 'VideoHandler\0' : 'SoundHandler\0'));
+  const xmhd = isV ? box('vmhd', full(0, 1), u16(0), u16(0), u16(0), u16(0)) : box('smhd', full(0, 0), u16(0), u16(0));
+  const dinf = box('dinf', box('dref', full(0, 0), u32(1), box('url ', full(0, 1))));
+  const r = rle(tr.deltas);
+  const stbl = [box('stsd', full(0, 0), u32(1), tr.entry), box('stts', full(0, 0), u32(r.length), r.flatMap(([c, d]) => [...u32(c), ...u32(d)]))];
+  if (isV) { const keys = tr.samples.map((s, i) => s.key ? i + 1 : 0).filter(Boolean); stbl.push(box('stss', full(0, 0), u32(keys.length), keys.flatMap(u32))); }
+  stbl.push(box('stsc', full(0, 0), u32(1), u32(1), u32(N), u32(1)),
+            box('stsz', full(0, 0), u32(0), u32(N), tr.samples.flatMap(s => u32(s.data.length))),
+            box('stco', full(0, 0), u32(1), u32(off)));
+  return box('trak', tkhd, box('mdia', mdhd, hdlr, box('minf', xmhd, dinf, box('stbl', ...stbl))));
+}
+function mp4Mux(tracks) {
+  const ftyp = box('ftyp', TE.encode('isom'), u32(0x200), TE.encode('isomiso2avc1mp41'));
+  const ms = Math.max(...tracks.map(tr => Math.round(tr.deltas.reduce((a, b) => a + b, 0) / tr.timescale * 1000)));
+  const mvhd = box('mvhd', full(0, 0), u32(0), u32(0), u32(1000), u32(ms), u32(0x10000), u16(0x100), u16(0),
+                   u32(0), u32(0), MATRIX, new Array(24).fill(0), u32(tracks.length + 1));
+  const build = offs => box('moov', mvhd, ...tracks.map((tr, i) => trak(tr, i + 1, offs[i])));
+  const sizes = tracks.map(tr => tr.samples.reduce((a, s) => a + s.data.length, 0));
+  let o = ftyp.length + build(tracks.map(() => 0)).length + 8;
+  const offs = sizes.map(s => { const r = o; o += s; return r; });
+  const moov = build(offs);
+  return new Blob([ftyp, moov, new Uint8Array(u32(sizes.reduce((a, b) => a + b, 0) + 8)), TE.encode('mdat'),
+                   ...tracks.flatMap(tr => tr.samples.map(s => s.data))], { type: 'video/mp4' });
+}
+const toU8 = d => (d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array(d.buffer, d.byteOffset, d.byteLength)).slice();
+
+async function encodeAudio(buf) {
+  if (!window.AudioEncoder || !buf) return null;
+  const sr = buf.sampleRate, ch = buf.numberOfChannels;
+  const cands = [
+    { kind: 'aac', cfg: { codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: ch, bitrate: 192000, aac: { format: 'aac' } } },
+    { kind: 'opus', cfg: { codec: 'opus', sampleRate: sr, numberOfChannels: ch, bitrate: 192000 } },
+  ];
+  let pick = null;
+  for (const c of cands) { try { if ((await AudioEncoder.isConfigSupported(c.cfg)).supported) { pick = c; break; } } catch (e) {} }
+  if (!pick) return null;
+  const samples = [], deltas = []; let desc = null, err = null;
+  const enc = new AudioEncoder({
+    output: (chunk, meta) => {
+      const d = meta && meta.decoderConfig && meta.decoderConfig.description; if (d && !desc) desc = toU8(d);
+      const b = new Uint8Array(chunk.byteLength); chunk.copyTo(b); samples.push({ data: b, key: true });
+      deltas.push(chunk.duration ? Math.round(chunk.duration * sr / 1e6) : (pick.kind === 'aac' ? 1024 : 960));
+    },
+    error: e => { err = e; },
+  });
+  enc.configure(pick.cfg);
+  const L = buf.length, STEP = 4800, chans = [...Array(ch)].map((_, i) => buf.getChannelData(i));
+  for (let i = 0; i < L; i += STEP) {
+    const n = Math.min(STEP, L - i), data = new Float32Array(n * ch);
+    for (let c = 0; c < ch; c++) data.set(chans[c].subarray(i, i + n), c * n);
+    const ad = new AudioData({ format: 'f32-planar', sampleRate: sr, numberOfFrames: n, numberOfChannels: ch, timestamp: Math.round(i / sr * 1e6), data });
+    enc.encode(ad); ad.close();
+  }
+  await enc.flush(); enc.close();
+  if (err || !samples.length) return null;
+  return { kind: 'audio', samples, deltas, timescale: sr, entry: audioEntry(pick.kind, desc, sr, ch), codec: pick.kind };
+}
+
+
+async function exportMP4(onProgress = () => {}, opt = {}) {
+  if (!window.VideoEncoder) throw new Error('이 브라우저는 WebCodecs(VideoEncoder)를 지원하지 않습니다. 최신 Chrome/Edge를 사용해 주세요.');
+  const light = opt.light ?? ($('quality').value === 'light'), fps = 30;
+  let cfg = null;
+  for (const codec of ['avc1.640028', 'avc1.64002A', 'avc1.4D0028', 'avc1.42E028']) {
+    const c = { codec, width: W, height: H, bitrate: light ? 2e6 : 4.5e6, framerate: fps, avc: { format: 'avc' } };
+    if ((await VideoEncoder.isConfigSupported(c)).supported) { cfg = c; break; }
+  }
+  if (!cfg) throw new Error('H.264 인코딩을 지원하지 않는 브라우저입니다.');
+  const samples = []; let avcC = null, err = null;
+  const venc = new VideoEncoder({
+    output: (chunk, meta) => {
+      const d = meta && meta.decoderConfig && meta.decoderConfig.description; if (d && !avcC) avcC = toU8(d);
+      const b = new Uint8Array(chunk.byteLength); chunk.copyTo(b); samples.push({ data: b, key: chunk.type === 'key' });
+    },
+    error: e => { err = e; },
+  });
+  venc.configure(cfg);
+  const N = DUR * fps, us = 1e6 / fps;
+  exporting = true;
+  try {
+    for (let i = 0; i < N; i++) {
+      if (err) throw err;
+      render(i / fps);
+      const f = new VideoFrame(cv, { timestamp: Math.round(i * us), duration: Math.round(us) });
+      venc.encode(f, { keyFrame: i % (fps * 2) === 0 }); f.close();
+      while (venc.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 2));
+      if (i % 10 === 0) { onProgress(0.97 * i / N); await new Promise(r => setTimeout(r, 0)); }
+    }
+    await venc.flush(); venc.close();
+    if (err) throw err;
+    if (!avcC) throw new Error('인코더가 코덱 설정(avcC)을 반환하지 않았습니다.');
+    const vt = { kind: 'video', samples, deltas: samples.map(() => 100), timescale: fps * 100, entry: videoEntry(avcC, W, H), w: W, h: H };
+    const at = await encodeAudio(await audioReady);
+    lastExportInfo = { fps, codec: cfg.codec, videoFrames: samples.length, audio: at ? at.codec : 'none' };
+    onProgress(1);
+    return mp4Mux(at ? [vt, at] : [vt]);
+  } finally { exporting = false; }
+}
+let lastExportInfo = null;
+window.exportMP4 = exportMP4; window.getExportInfo = () => lastExportInfo;
+
+// =====================================================================
+// 6) 플레이어
+// =====================================================================
+let playing = false, cur = 0, pbase = 0, exporting = false, audioBuf = null, actx = null, src = null, t0 = 0;
+const setStatus = s => { $('status').textContent = s; };
+const audioReady = makeAudio().then(b => { audioBuf = b; setStatus('준비 완료 · 인물 이미지 3장을 넣어 주세요'); return b; })
+  .catch(e => { setStatus('오디오 생성 실패: ' + e.message); return null; });
+window.audioReady = audioReady;
+
+function stopAudio() { if (src) { try { src.stop(); } catch (e) {} src.disconnect(); src = null; } }
+function startAudio(off) {
+  stopAudio(); if (!audioBuf) return;
+  if (!actx) actx = new AudioContext({ sampleRate: 48000 });
+  actx.resume(); src = actx.createBufferSource(); src.buffer = audioBuf; src.connect(actx.destination); src.start(0, off); t0 = actx.currentTime - off;
+}
+function setPlayLabel() { $('play').textContent = playing ? '⏸ 일시정지' : '▶ 재생'; }
+function play() { if (cur >= DUR - 0.02) cur = 0; playing = true; pbase = performance.now() - cur * 1000; startAudio(cur); setPlayLabel(); }
+function pause() { playing = false; stopAudio(); setPlayLabel(); }
+function seek(t) { cur = t; if (playing) { pbase = performance.now() - t * 1000; startAudio(t); } }
+const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+function loop(now) {
+  if (!exporting) {
+    if (playing) { cur = src ? actx.currentTime - t0 : (now - pbase) / 1000; if (cur >= DUR) { cur = DUR - 0.001; pause(); } }
+    render(cur); $('scrub').value = cur.toFixed(2); $('tc').textContent = `${fmt(cur)} / 01:00`;
+  }
+  requestAnimationFrame(loop);
+}
+$('play').onclick = () => (playing ? pause() : play());
+$('restart').onclick = () => { cur = 0; play(); };
+$('scrub').oninput = e => seek(+e.target.value);
+
+const srcImgs = [null, null, null];
+function applyImage(i) {
+  if (!srcImgs[i]) return;
+  const r = processSheet(srcImgs[i], $('key').checked);
+  CAST[i] = r.set; $('s' + i).textContent = r.msg;
+}
+function loadCast(i, url) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => { srcImgs[i] = im; applyImage(i); res(); };
+    im.onerror = () => { $('s' + i).textContent = '이미지를 읽지 못했습니다'; rej(new Error('load failed')); };
+    im.src = url;
+  });
+}
+window.loadCast = loadCast;
+[0, 1, 2].forEach(i => { $('f' + i).onchange = e => { const f = e.target.files[0]; if (f) loadCast(i, URL.createObjectURL(f)); }; });
+$('key').onchange = () => [0, 1, 2].forEach(applyImage);
+
+$('mp4').onclick = async () => {
+  const btn = $('mp4'); if (playing) pause(); btn.disabled = true;
+  try {
+    const blob = await exportMP4(p => { btn.textContent = `렌더링 ${Math.round(p * 100)}%`; });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '1207-secret-ep1-60s.mp4'; a.click();
+    setStatus(`MP4 완료 · ${(blob.size / 1e6).toFixed(1)}MB · 오디오 ${lastExportInfo.audio.toUpperCase()}`);
+  } catch (e) { alert(e.message); }
+  btn.disabled = false; btn.textContent = '⬇ MP4 다운로드';
+};
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => requestAnimationFrame(loop));
+</script>
+</body>
+</html>
